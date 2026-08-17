@@ -24,6 +24,7 @@ import ReminderCard from './components/ReminderCard';
 import HistoryCard from './components/HistoryCard';
 import ScheduledReminderCard from './components/ScheduledReminderCard';
 import AddReminderModal from './components/AddReminderModal';
+import AnimatedSplash from './components/AnimatedSplash';
 
 type Tab = 'active' | 'history' | 'remind_me';
 
@@ -32,6 +33,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('active');
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [addReminderModalVisible, setAddReminderModalVisible] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
 
   const {
     reminders,
@@ -389,6 +391,7 @@ export default function App() {
                 ? '🔔 High-priority alert with sound & vibration at scheduled time'
                 : '💾 History is saved locally on your device'}
             </Text>
+            <Text style={styles.footerCreditText}>Designed and implemented by Krishna Mahajan</Text>
           </View>
         )}
       </KeyboardAvoidingView>
@@ -399,6 +402,10 @@ export default function App() {
         onClose={() => setAddReminderModalVisible(false)}
         onAddReminder={handleAddScheduledFromModal}
       />
+
+      {showSplash && (
+        <AnimatedSplash ready={!loading} onFinish={() => setShowSplash(false)} />
+      )}
     </View>
   );
 }
@@ -526,6 +533,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  footerCreditText: {
+    fontSize: 10,
+    color: '#3a3a54',
+    textAlign: 'center',
+    marginTop: 4,
   },
   emptyContainer: {
     flex: 1,

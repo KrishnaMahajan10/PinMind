@@ -13,6 +13,7 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
@@ -25,6 +26,9 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+hs_err_pid*.log
+replay_pid*.log
+build_full.log
 
 # macOS
 .DS_Store
@@ -36,6 +40,12 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native folders
+# Android build output (native source under android/ is checked in)
+android/build/
+android/app/build/
+android/.gradle/
+android/.cxx/
+android/local.properties
+
+# generated native folders (iOS not used in this project)
 /ios
-/android
