@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "PinMind",
+    "slug": "pinmind",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0d0d1a",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.pinmind.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#f97316"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a9b67c7b-8844-470c-81e9-726dcf082156"
+      }
+    },
+    "owner": "krishna100"
+  }
+}
