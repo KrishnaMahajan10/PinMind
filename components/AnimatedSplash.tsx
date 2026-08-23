@@ -79,7 +79,7 @@ export default function AnimatedSplash({
   return (
     <Animated.View style={[styles.container, { opacity: containerOpacity }]}>
       <Animated.Image
-        source={require('../assets/android-icon-foreground.png')}
+        source={require('../assets/splash-icon.png')}
         style={[
           styles.icon,
           { opacity: iconOpacity, transform: [{ scale: iconScale }] },
