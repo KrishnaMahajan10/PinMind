@@ -5,6 +5,7 @@ import {
   TextInput,
   TouchableOpacity,
   FlatList,
+  Image,
   StyleSheet,
   StatusBar,
   ActivityIndicator,
@@ -210,7 +211,14 @@ export default function App() {
             { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
           ]}
         >
-          <Text style={styles.headerTitle}>📌 PinMind</Text>
+          <View style={styles.headerTitleRow}>
+            <Image
+              source={require('./assets/icon-mark.png')}
+              style={styles.headerMark}
+              resizeMode="contain"
+            />
+            <Text style={styles.headerTitle}>PinMind</Text>
+          </View>
           <Text style={styles.headerSubtitle}>{getSubtitle()}</Text>
 
           {/* 3-Tab Bar: Active | History (Middle) | Remind Me */}
@@ -422,6 +430,15 @@ const styles = StyleSheet.create({
     paddingTop: 56,
     paddingBottom: 16,
     paddingHorizontal: 20,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerMark: {
+    width: 21,
+    height: 33,
+    marginRight: 10,
   },
   headerTitle: {
     fontSize: 30,
