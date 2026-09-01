@@ -26,14 +26,45 @@ class ReminderModule(private val reactContext: ReactApplicationContext) :
         } else {
             reactContext.startService(intent)
         }
+        ReminderHeartbeat.schedule(reactContext)
     }
 
     @ReactMethod
     fun stopForegroundService() {
+        // Clear here rather than through ACTION_STOP: stopService does not deliver
+        // the intent to onStartCommand, so the store would otherwise keep a stale
+        // list and the next refresh would resurrect deleted reminders.
+        ReminderStore.clear(reactContext)
+        if (!ReminderStore.hasWork(reactContext)) {
+            ReminderHeartbeat.cancel(reactContext)
+        }
         val intent = Intent(reactContext, ReminderForegroundService::class.java).apply {
             action = ReminderForegroundService.ACTION_STOP
         }
         reactContext.stopService(intent)
+    }
+
+    /**
+     * Mirror the pending "Remind Me" list so the minute heartbeat can promote a
+     * reminder that comes due while the JS process is dead — or whose own exact
+     * alarm was dropped by the OS.
+     */
+    @ReactMethod
+    fun setScheduledReminders(scheduledJson: String) {
+        ReminderStore.writeScheduled(reactContext, scheduledJson)
+        if (ReminderStore.hasWork(reactContext)) {
+            ReminderHeartbeat.schedule(reactContext)
+        } else {
+            ReminderHeartbeat.cancel(reactContext)
+        }
+    }
+
+    /** Arm the minute refresh chain if there is anything to keep showing. */
+    @ReactMethod
+    fun startHeartbeat() {
+        if (ReminderStore.hasWork(reactContext)) {
+            ReminderHeartbeat.schedule(reactContext)
+        }
     }
 
     private fun alarmPendingIntent(id: String): PendingIntent {
@@ -86,13 +117,11 @@ class ReminderModule(private val reactContext: ReactApplicationContext) :
     fun cancelNativeAlert(id: String) {
         val alarmManager = reactContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         alarmManager.cancel(alarmPendingIntent(id))
+        ReminderStore.removeScheduled(reactContext, id)
     }
 
     @ReactMethod
     fun getForegroundReminders(promise: Promise) {
-        val json = reactContext
-            .getSharedPreferences("pinmind_prefs", Context.MODE_PRIVATE)
-            .getString("last_reminders", "[]") ?: "[]"
-        promise.resolve(json)
+        promise.resolve(ReminderStore.readActiveJson(reactContext))
     }
 }

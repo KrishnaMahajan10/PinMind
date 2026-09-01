@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   syncRemindersToNotifications,
+  syncScheduledRemindersToNative,
+  startReminderHeartbeat,
   scheduleTimedAlert,
   cancelTimedAlert,
   getNativeForegroundReminders,
@@ -41,6 +43,11 @@ export function useReminders() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Latest lists, so the periodic sweep below always reads current state without
+  // having to tear down and re-arm its interval on every change.
+  const latestRef = useRef({ active: reminders, scheduled: scheduledReminders });
+  latestRef.current = { active: reminders, scheduled: scheduledReminders };
+
   // Promote past-due scheduled reminders to active pinned reminders
   const checkAndPromoteDueReminders = useCallback(
     async (
@@ -67,6 +74,7 @@ export function useReminders() {
         AsyncStorage.setItem(SCHEDULED_STORAGE_KEY, JSON.stringify(updatedScheduled)),
       ]);
 
+      await syncScheduledRemindersToNative(updatedScheduled);
       await syncRemindersToNotifications(updatedActive);
 
       return { updatedActive, updatedScheduled };
@@ -101,9 +109,12 @@ export function useReminders() {
         const nativeReminders = await getNativeForegroundReminders();
         if (nativeReminders.length > 0) {
           const activeIds = new Set(finalActive.map((r) => r.id));
-          const scheduledIds = new Set(finalScheduled.map((s) => s.id));
+          const doneIds = new Set(storedHistory.map((h) => h.id));
+          // Anything the native side pinned that JS does not already show — whether
+          // its exact alarm fired or the minute heartbeat swept it up — belongs in
+          // the Active tab. Items already marked done are never resurrected.
           const toPromote = nativeReminders.filter(
-            (n) => !activeIds.has(n.id) && scheduledIds.has(n.id)
+            (n) => !activeIds.has(n.id) && !doneIds.has(n.id)
           );
           if (toPromote.length > 0) {
             const promotedIds = new Set(toPromote.map((n) => n.id));
@@ -131,7 +142,9 @@ export function useReminders() {
           }
         }
 
+        await syncScheduledRemindersToNative(finalScheduled);
         await syncRemindersToNotifications(finalActive);
+        startReminderHeartbeat();
       } catch (e) {
         console.error('Failed to load reminders', e);
       } finally {
@@ -142,31 +155,29 @@ export function useReminders() {
 
   // Periodic check every 15 seconds to promote due reminders automatically
   useEffect(() => {
-    const interval = setInterval(async () => {
-      setScheduledReminders((currentScheduled) => {
-        const now = Date.now();
-        const due = currentScheduled.filter((s) => s.remindAt <= now);
-        if (due.length === 0) return currentScheduled;
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const due = latestRef.current.scheduled.filter((s) => s.remindAt <= now);
+      if (due.length === 0) return;
 
-        // Perform async promotion
-        setReminders((currentActive) => {
-          const newActive: Reminder[] = due.map((d) => ({
-            id: d.id,
-            text: d.text,
-            createdAt: d.createdAt,
-          }));
-          const updatedActive = [...newActive, ...currentActive];
-          const updatedScheduled = currentScheduled.filter((s) => s.remindAt > now);
+      const { active: currentActive, scheduled: currentScheduled } = latestRef.current;
+      const activeIds = new Set(currentActive.map((r) => r.id));
+      const promoted: Reminder[] = due
+        .filter((d) => !activeIds.has(d.id))
+        .map((d) => ({ id: d.id, text: d.text, createdAt: d.createdAt }));
 
-          AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedActive));
-          AsyncStorage.setItem(SCHEDULED_STORAGE_KEY, JSON.stringify(updatedScheduled));
-          syncRemindersToNotifications(updatedActive);
+      const updatedActive = [...promoted, ...currentActive];
+      const updatedScheduled = currentScheduled.filter((s) => s.remindAt > now);
 
-          return updatedActive;
-        });
+      setReminders(updatedActive);
+      setScheduledReminders(updatedScheduled);
 
-        return currentScheduled.filter((s) => s.remindAt > now);
-      });
+      (async () => {
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedActive));
+        await AsyncStorage.setItem(SCHEDULED_STORAGE_KEY, JSON.stringify(updatedScheduled));
+        await syncScheduledRemindersToNative(updatedScheduled);
+        await syncRemindersToNotifications(updatedActive);
+      })();
     }, 15000);
 
     return () => clearInterval(interval);
@@ -178,9 +189,10 @@ export function useReminders() {
     await syncRemindersToNotifications(updated);
   }, []);
 
-  // Persist scheduled reminders to AsyncStorage
+  // Persist scheduled reminders to AsyncStorage & mirror them to the native store
   const persistScheduled = useCallback(async (updated: ScheduledReminder[]) => {
     await AsyncStorage.setItem(SCHEDULED_STORAGE_KEY, JSON.stringify(updated));
+    await syncScheduledRemindersToNative(updated);
   }, []);
 
   // Add a normal active pinned reminder
