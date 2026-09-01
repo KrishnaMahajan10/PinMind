@@ -21,19 +21,24 @@ import {
   requestPermissions,
 } from './utils/notifications';
 import { useReminders } from './hooks/useReminders';
+import { useHabits } from './hooks/useHabits';
+import { getHabitProgress } from './utils/habitStats';
 import ReminderCard from './components/ReminderCard';
 import HistoryCard from './components/HistoryCard';
 import ScheduledReminderCard from './components/ScheduledReminderCard';
+import HabitCard from './components/HabitCard';
 import AddReminderModal from './components/AddReminderModal';
+import AddHabitModal from './components/AddHabitModal';
 import AnimatedSplash from './components/AnimatedSplash';
 
-type Tab = 'active' | 'history' | 'remind_me';
+type Tab = 'active' | 'tasks' | 'history' | 'remind_me';
 
 export default function App() {
   const [inputText, setInputText] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('active');
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [addReminderModalVisible, setAddReminderModalVisible] = useState(false);
+  const [addHabitModalVisible, setAddHabitModalVisible] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
 
   const {
@@ -49,9 +54,20 @@ export default function App() {
     markAsDone,
   } = useReminders();
 
+  const {
+    habits,
+    completions,
+    loading: habitsLoading,
+    addHabit,
+    deleteHabit,
+    toggleHabitToday,
+  } = useHabits();
+
   const inputRef = useRef<TextInput>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+
+  const isLoading = loading || habitsLoading;
 
   useEffect(() => {
     // Initialize notifications on mount
@@ -79,6 +95,10 @@ export default function App() {
 
     const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data;
+      if (data?.type === 'habit') {
+        setActiveTab('tasks');
+        return;
+      }
       if (data?.reminderId) {
         promoteScheduledToActive(data.reminderId as string);
       }
@@ -141,6 +161,34 @@ export default function App() {
     setActiveTab('remind_me');
   };
 
+  const handleAddHabitFromModal = async (
+    text: string,
+    hour: number,
+    minute: number,
+    days: number[]
+  ) => {
+    const permitted = await ensurePermissions();
+    if (!permitted) return;
+
+    await addHabit(text, hour, minute, days);
+    setActiveTab('tasks');
+  };
+
+  const handleDeleteHabit = (id: string) => {
+    Alert.alert(
+      'Remove Task',
+      'This will also cancel its daily reminder and delete its history. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => deleteHabit(id),
+        },
+      ]
+    );
+  };
+
   const handleDeleteActive = (id: string) => {
     Alert.alert(
       'Remove Reminder',
@@ -193,6 +241,10 @@ export default function App() {
         return scheduledReminders.length === 0
           ? 'No scheduled alerts'
           : `${scheduledReminders.length} scheduled alert${scheduledReminders.length > 1 ? 's' : ''}`;
+      case 'tasks':
+        return habits.length === 0
+          ? 'No daily tasks yet'
+          : `${habits.length} daily task${habits.length > 1 ? 's' : ''} tracked`;
     }
   };
 
@@ -230,6 +282,16 @@ export default function App() {
             >
               <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>
                 Active
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'tasks' && styles.tabActive]}
+              onPress={() => setActiveTab('tasks')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.tabText, activeTab === 'tasks' && styles.tabTextActive]}>
+                Tasks
               </Text>
             </TouchableOpacity>
 
@@ -309,8 +371,27 @@ export default function App() {
           </Animated.View>
         )}
 
+        {/* Action Header for Tasks Tab */}
+        {activeTab === 'tasks' && (
+          <Animated.View
+            style={[
+              styles.actionHeaderWrapper,
+              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+            ]}
+          >
+            <TouchableOpacity
+              style={[styles.addReminderTriggerBtn, styles.addHabitTriggerBtn]}
+              onPress={() => setAddHabitModalVisible(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.addReminderTriggerIcon}>🔁</Text>
+              <Text style={styles.addReminderTriggerText}>Add Task</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+
         {/* List Content */}
-        {loading ? (
+        {isLoading ? (
           <View style={styles.centerContainer}>
             <ActivityIndicator size="large" color="#f97316" />
           </View>
@@ -337,6 +418,40 @@ export default function App() {
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+            />
+          )
+        ) : activeTab === 'tasks' ? (
+          habits.length === 0 ? (
+            <Animated.View style={[styles.emptyContainer, { opacity: fadeAnim }]}>
+              <Text style={styles.emptyEmoji}>🔁</Text>
+              <Text style={styles.emptyTitle}>No daily tasks yet</Text>
+              <Text style={styles.emptyBody}>
+                Add a task like Gym or Study to get a daily{'\n'}reminder and track how consistent you are.
+              </Text>
+              <TouchableOpacity
+                style={[styles.emptyActionBtn, styles.emptyActionBtnHabit]}
+                onPress={() => setAddHabitModalVisible(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.emptyActionBtnText, styles.emptyActionBtnTextHabit]}>
+                  + Add Task
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+          ) : (
+            <FlatList
+              data={habits}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <HabitCard
+                  habit={item}
+                  progress={getHabitProgress(item, completions[item.id] ?? [])}
+                  onToggleToday={toggleHabitToday}
+                  onDelete={handleDeleteHabit}
+                />
+              )}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
             />
           )
         ) : activeTab === 'history' ? (
@@ -390,13 +505,15 @@ export default function App() {
         )}
 
         {/* Footer info note */}
-        {!loading && (
+        {!isLoading && (
           <View style={styles.footer}>
             <Text style={styles.footerText}>
               {activeTab === 'active'
                 ? '🔒 Pinned silently to notification bar • Won\'t vibrate continuously'
                 : activeTab === 'remind_me'
                 ? '🔔 High-priority alert with sound & vibration at scheduled time'
+                : activeTab === 'tasks'
+                ? '🔁 Recurring alert on your chosen days • Tap ✓ once you\'re done'
                 : '💾 History is saved locally on your device'}
             </Text>
             <Text style={styles.footerCreditText}>Designed and implemented by Krishna Mahajan</Text>
@@ -411,8 +528,15 @@ export default function App() {
         onAddReminder={handleAddScheduledFromModal}
       />
 
+      {/* Add Daily Task Modal */}
+      <AddHabitModal
+        visible={addHabitModalVisible}
+        onClose={() => setAddHabitModalVisible(false)}
+        onAddHabit={handleAddHabitFromModal}
+      />
+
       {showSplash && (
-        <AnimatedSplash ready={!loading} onFinish={() => setShowSplash(false)} />
+        <AnimatedSplash ready={!isLoading} onFinish={() => setShowSplash(false)} />
       )}
     </View>
   );
@@ -471,10 +595,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#f97316',
   },
   tabText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: '#717196',
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
   },
   tabTextActive: {
     color: '#ffffff',
@@ -543,6 +667,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.2,
   },
+  addHabitTriggerBtn: {
+    backgroundColor: '#8b5cf6',
+    shadowColor: '#8b5cf6',
+  },
   listContent: {
     paddingBottom: 20,
   },
@@ -593,6 +721,12 @@ const styles = StyleSheet.create({
     color: '#f97316',
     fontSize: 14,
     fontWeight: '700',
+  },
+  emptyActionBtnHabit: {
+    borderColor: '#8b5cf6',
+  },
+  emptyActionBtnTextHabit: {
+    color: '#8b5cf6',
   },
   footer: {
     paddingHorizontal: 20,

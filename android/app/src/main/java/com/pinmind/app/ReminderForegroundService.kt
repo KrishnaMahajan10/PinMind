@@ -21,11 +21,11 @@ class ReminderForegroundService : Service() {
         const val NOTIFICATION_ID = 1001
         const val EXTRA_REMINDERS = "extra_reminders"
         const val ACTION_UPDATE = "action_update"
+        const val ACTION_REFRESH = "action_refresh"
         const val ACTION_STOP = "action_stop"
     }
 
     private var isStarted = false
-    private var lastRemindersJson: String = "[]"
 
     override fun onCreate() {
         super.onCreate()
@@ -35,33 +35,42 @@ class ReminderForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Only an explicit ACTION_STOP call should stop the service.
         // intent == null means Android restarted us after a process kill via START_STICKY —
-        // in that case we restore from SharedPreferences and keep running.
+        // in that case we restore from the store and keep running.
         if (intent?.action == ACTION_STOP) {
+            ReminderStore.clear(this)
+            ReminderHeartbeat.cancel(this)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             isStarted = false
             return START_NOT_STICKY
         }
 
-        // Restore persisted reminders when restarted by the OS (intent is null)
-        val remindersJson: String = when {
-            intent != null -> intent.getStringExtra(EXTRA_REMINDERS) ?: lastRemindersJson
-            else -> getSharedPreferences("pinmind_prefs", Context.MODE_PRIVATE)
-                        .getString("last_reminders", "[]") ?: "[]"
+        // A push from JS carries the authoritative active list. Every other entry
+        // point — the minute tick, a boot, a START_STICKY restart — rebuilds from
+        // whatever is already stored.
+        if (intent?.action == ACTION_UPDATE) {
+            intent.getStringExtra(EXTRA_REMINDERS)?.let { ReminderStore.writeActive(this, it) }
         }
-        val reminderList = parseReminders(remindersJson)
+
+        // Whatever woke us, re-check the whole picture before drawing: anything that
+        // fell due since the last pass gets merged into the list first, so a refresh
+        // never shows a stale or partial set of reminders.
+        ReminderStore.promoteDue(this)
+
+        val reminderList = parseReminders(ReminderStore.readActiveJson(this))
 
         if (reminderList.isEmpty()) {
+            // Keep ticking while scheduled reminders are still waiting to come due.
+            if (ReminderStore.hasWork(this)) {
+                ReminderHeartbeat.schedule(this)
+            } else {
+                ReminderHeartbeat.cancel(this)
+            }
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             isStarted = false
             return START_NOT_STICKY
         }
-
-        // Persist so we can restore after process kill
-        lastRemindersJson = remindersJson
-        getSharedPreferences("pinmind_prefs", Context.MODE_PRIVATE)
-            .edit().putString("last_reminders", remindersJson).apply()
 
         val notification = buildNotification(reminderList)
 
@@ -72,6 +81,9 @@ class ReminderForegroundService : Service() {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(NOTIFICATION_ID, notification)
         }
+
+        // Keep the minute heartbeat armed for as long as anything is pinned.
+        ReminderHeartbeat.schedule(this)
 
         return START_STICKY
     }
@@ -126,6 +138,11 @@ class ReminderForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            // Re-stamping the time on every minute tick keeps the pin sorted to the
+            // top of the shade instead of drifting down as other apps post.
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(false)
+            .setOnlyAlertOnce(true)
 
         val notification = builder.build()
         // FLAG_ONGOING_EVENT: pins the notification at the top
@@ -165,23 +182,24 @@ class ReminderForegroundService : Service() {
 
     /**
      * Called when the user swipes the app away from Recents.
-     * We restart the foreground service immediately using the last known reminders
+     * We restart the foreground service immediately from the stored reminders
      * so the pinned notification never disappears.
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        val savedJson = getSharedPreferences("pinmind_prefs", Context.MODE_PRIVATE)
-            .getString("last_reminders", "[]") ?: "[]"
-        if (savedJson != "[]" && savedJson.isNotBlank()) {
-            val restartIntent = Intent(this, ReminderForegroundService::class.java).apply {
-                action = ACTION_UPDATE
-                putExtra(EXTRA_REMINDERS, savedJson)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(restartIntent)
-            } else {
-                startService(restartIntent)
-            }
+        if (!ReminderStore.hasWork(this)) return
+
+        ReminderHeartbeat.schedule(this, 5_000L)
+
+        if (ReminderStore.readActive(this).length() == 0) return
+
+        val restartIntent = Intent(this, ReminderForegroundService::class.java).apply {
+            action = ACTION_REFRESH
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(restartIntent)
+        } else {
+            startService(restartIntent)
         }
     }
 }
