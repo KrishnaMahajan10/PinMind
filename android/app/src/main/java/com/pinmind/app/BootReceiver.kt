@@ -19,9 +19,10 @@ class BootReceiver : BroadcastReceiver() {
         ) return
 
         val appContext = context.applicationContext
-        if (!ReminderStore.hasWork(appContext)) return
+        if (!ReminderStore.hasWork(appContext) && !HabitStore.hasHabits(appContext)) return
 
         ReminderStore.promoteDue(appContext)
+        TasksNotifier.refresh(appContext)
         ReminderHeartbeat.schedule(appContext, 5_000L)
 
         if (ReminderStore.readActive(appContext).length() == 0) return

@@ -56,12 +56,13 @@ class ReminderForegroundService : Service() {
         // fell due since the last pass gets merged into the list first, so a refresh
         // never shows a stale or partial set of reminders.
         ReminderStore.promoteDue(this)
+        TasksNotifier.refresh(this)
 
         val reminderList = parseReminders(ReminderStore.readActiveJson(this))
 
         if (reminderList.isEmpty()) {
-            // Keep ticking while scheduled reminders are still waiting to come due.
-            if (ReminderStore.hasWork(this)) {
+            // Keep ticking while scheduled reminders — or habits — are still waiting.
+            if (ReminderStore.hasWork(this) || HabitStore.hasHabits(this)) {
                 ReminderHeartbeat.schedule(this)
             } else {
                 ReminderHeartbeat.cancel(this)
@@ -187,7 +188,7 @@ class ReminderForegroundService : Service() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        if (!ReminderStore.hasWork(this)) return
+        if (!ReminderStore.hasWork(this) && !HabitStore.hasHabits(this)) return
 
         ReminderHeartbeat.schedule(this, 5_000L)
 

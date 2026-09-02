@@ -4,9 +4,6 @@ import { Platform, NativeModules, Linking, Alert } from 'react-native';
 const { ReminderModule } = NativeModules;
 export const CHANNEL_ID_PERSISTENT = 'persistent-reminders';
 export const CHANNEL_ID_ALERTS = 'timed-alerts';
-export const CHANNEL_ID_TASKS = 'daily-tasks';
-
-const HABIT_IDENTIFIER_PREFIX = 'habit_';
 
 // Identifier for the single aggregated "To Do" pin used by the Expo Go fallback.
 const PERSISTENT_SUMMARY_ID = 'pinmind_todo_summary';
@@ -67,112 +64,8 @@ export async function createNotificationChannels() {
       lightColor: '#f97316',
       showBadge: true,
     });
-
-    // 3. Recurring Daily Task Channel
-    await Notifications.setNotificationChannelAsync(CHANNEL_ID_TASKS, {
-      name: 'Tasks',
-      description: 'Recurring daily/weekly task reminders at the time you choose.',
-      importance: Notifications.AndroidImportance.MAX,
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-      bypassDnd: true,
-      sound: 'default',
-      enableVibrate: true,
-      vibrationPattern: [0, 250, 150, 250],
-      enableLights: true,
-      lightColor: '#8b5cf6',
-      showBadge: true,
-    });
   } catch (error) {
     console.error('Error creating notification channels:', error);
-  }
-}
-
-/**
- * All possible notification identifiers a habit could occupy: one for the
- * "every day" case, plus one per weekday (Expo weekday: 1 = Sunday ... 7 =
- * Saturday) for the "selected days" case. Cancelling is safe to call even for
- * identifiers that were never scheduled.
- */
-function habitIdentifiers(habitId: string): string[] {
-  return [
-    `${HABIT_IDENTIFIER_PREFIX}${habitId}_daily`,
-    ...[1, 2, 3, 4, 5, 6, 7].map((weekday) => `${HABIT_IDENTIFIER_PREFIX}${habitId}_${weekday}`),
-  ];
-}
-
-/**
- * Cancel every recurring notification belonging to a habit.
- */
-export async function cancelHabitNotifications(habitId: string) {
-  for (const identifier of habitIdentifiers(habitId)) {
-    try {
-      await Notifications.cancelScheduledNotificationAsync(identifier);
-    } catch {}
-  }
-}
-
-/**
- * Schedule (or reschedule) the recurring "Tasks" alert for a habit, using
- * expo-notifications' native DAILY/WEEKLY triggers. These are backed by
- * AlarmManager and expo-notifications registers its own boot receiver, so the
- * schedule survives reboots without any custom native code.
- */
-export async function scheduleHabitNotifications(habit: {
-  id: string;
-  text: string;
-  hour: number;
-  minute: number;
-  days: number[];
-}) {
-  await createNotificationChannels();
-  await cancelHabitNotifications(habit.id);
-
-  if (habit.days.length === 0) return;
-
-  const content: Notifications.NotificationContentInput = {
-    title: 'Tasks',
-    body: habit.text,
-    sound: true,
-    priority: Notifications.AndroidNotificationPriority.MAX,
-    color: '#8b5cf6',
-    data: {
-      type: 'habit',
-      habitId: habit.id,
-    },
-  };
-
-  if (Platform.OS === 'android') {
-    (content as any).channelId = CHANNEL_ID_TASKS;
-  }
-
-  if (habit.days.length === 7) {
-    await Notifications.scheduleNotificationAsync({
-      identifier: `${HABIT_IDENTIFIER_PREFIX}${habit.id}_daily`,
-      content,
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DAILY,
-        hour: habit.hour,
-        minute: habit.minute,
-        channelId: CHANNEL_ID_TASKS,
-      },
-    });
-    return;
-  }
-
-  for (const day of habit.days) {
-    // JS Date#getDay(): 0 = Sunday ... 6 = Saturday. Expo weekday: 1 = Sunday ... 7 = Saturday.
-    const weekday = day + 1;
-    await Notifications.scheduleNotificationAsync({
-      identifier: `${HABIT_IDENTIFIER_PREFIX}${habit.id}_${weekday}`,
-      content,
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-        weekday,
-        hour: habit.hour,
-        minute: habit.minute,
-        channelId: CHANNEL_ID_TASKS,
-      },
-    });
   }
 }
 
@@ -265,6 +158,36 @@ export async function syncScheduledRemindersToNative(
     ReminderModule.setScheduledReminders(JSON.stringify(scheduled));
   } catch (e) {
     console.warn('Failed to mirror scheduled reminders to native:', e);
+  }
+}
+
+/**
+ * Mirror the full habit list into the native store so the minute heartbeat
+ * can pin/refresh the "Tasks" notification — the same reliability mechanism
+ * behind the "To Do" pin — rather than relying on a standalone alarm that
+ * some OEMs kill silently.
+ */
+export async function syncHabitsToNative(
+  habits: Array<{ id: string; text: string; hour: number; minute: number; days: number[] }>
+) {
+  if (Platform.OS !== 'android' || !ReminderModule?.setHabits) return;
+  try {
+    ReminderModule.setHabits(JSON.stringify(habits));
+  } catch (e) {
+    console.warn('Failed to mirror habits to native:', e);
+  }
+}
+
+/**
+ * Mirror the full set of habit ids ticked done today, so the native side
+ * stops nagging for anything already completed.
+ */
+export async function syncHabitsDoneTodayToNative(doneIdsToday: string[]) {
+  if (Platform.OS !== 'android' || !ReminderModule?.setHabitsDoneToday) return;
+  try {
+    ReminderModule.setHabitsDoneToday(JSON.stringify(doneIdsToday));
+  } catch (e) {
+    console.warn("Failed to mirror today's habit completions to native:", e);
   }
 }
 
