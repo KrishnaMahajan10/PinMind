@@ -95,10 +95,6 @@ export default function App() {
 
     const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data;
-      if (data?.type === 'habit') {
-        setActiveTab('tasks');
-        return;
-      }
       if (data?.reminderId) {
         promoteScheduledToActive(data.reminderId as string);
       }

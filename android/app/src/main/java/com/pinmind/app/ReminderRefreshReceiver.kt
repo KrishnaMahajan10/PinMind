@@ -24,8 +24,9 @@ class ReminderRefreshReceiver : BroadcastReceiver() {
 
         // Sweep anything that became due since the last tick into the active list.
         ReminderStore.promoteDue(appContext)
+        TasksNotifier.refresh(appContext)
 
-        if (!ReminderStore.hasWork(appContext)) {
+        if (!ReminderStore.hasWork(appContext) && !HabitStore.hasHabits(appContext)) {
             // Nothing left to show or wait for — stop burning alarms until JS adds something.
             ReminderHeartbeat.cancel(appContext)
             return

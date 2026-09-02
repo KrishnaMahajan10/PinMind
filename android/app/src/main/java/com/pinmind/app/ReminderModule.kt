@@ -35,7 +35,7 @@ class ReminderModule(private val reactContext: ReactApplicationContext) :
         // the intent to onStartCommand, so the store would otherwise keep a stale
         // list and the next refresh would resurrect deleted reminders.
         ReminderStore.clear(reactContext)
-        if (!ReminderStore.hasWork(reactContext)) {
+        if (!hasAnyWork()) {
             ReminderHeartbeat.cancel(reactContext)
         }
         val intent = Intent(reactContext, ReminderForegroundService::class.java).apply {
@@ -52,7 +52,7 @@ class ReminderModule(private val reactContext: ReactApplicationContext) :
     @ReactMethod
     fun setScheduledReminders(scheduledJson: String) {
         ReminderStore.writeScheduled(reactContext, scheduledJson)
-        if (ReminderStore.hasWork(reactContext)) {
+        if (hasAnyWork()) {
             ReminderHeartbeat.schedule(reactContext)
         } else {
             ReminderHeartbeat.cancel(reactContext)
@@ -62,9 +62,35 @@ class ReminderModule(private val reactContext: ReactApplicationContext) :
     /** Arm the minute refresh chain if there is anything to keep showing. */
     @ReactMethod
     fun startHeartbeat() {
-        if (ReminderStore.hasWork(reactContext)) {
+        if (hasAnyWork()) {
             ReminderHeartbeat.schedule(reactContext)
         }
+    }
+
+    private fun hasAnyWork(): Boolean =
+        ReminderStore.hasWork(reactContext) || HabitStore.hasHabits(reactContext)
+
+    /**
+     * Mirror the full habit list so the minute heartbeat can pin/refresh the
+     * "Tasks" notification even while the JS process is dead — mirroring how
+     * setScheduledReminders backs the "To Do" pin.
+     */
+    @ReactMethod
+    fun setHabits(habitsJson: String) {
+        HabitStore.writeHabits(reactContext, habitsJson)
+        TasksNotifier.refresh(reactContext)
+        if (hasAnyWork()) {
+            ReminderHeartbeat.schedule(reactContext)
+        } else {
+            ReminderHeartbeat.cancel(reactContext)
+        }
+    }
+
+    /** JS always sends the full current set of habit ids ticked done today. */
+    @ReactMethod
+    fun setHabitsDoneToday(doneIdsJson: String) {
+        HabitStore.writeDoneToday(reactContext, doneIdsJson)
+        TasksNotifier.refresh(reactContext)
     }
 
     private fun alarmPendingIntent(id: String): PendingIntent {
