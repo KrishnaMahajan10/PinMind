@@ -8,6 +8,7 @@ import {
   cancelTimedAlert,
   getNativeForegroundReminders,
 } from '../utils/notifications';
+import { LIST_ITEM_ID_PREFIX } from './useLists';
 
 const STORAGE_KEY = '@reminders';
 const SCHEDULED_STORAGE_KEY = '@reminders_scheduled';
@@ -112,9 +113,14 @@ export function useReminders() {
           const doneIds = new Set(storedHistory.map((h) => h.id));
           // Anything the native side pinned that JS does not already show — whether
           // its exact alarm fired or the minute heartbeat swept it up — belongs in
-          // the Active tab. Items already marked done are never resurrected.
+          // the Active tab. Items already marked done are never resurrected, and
+          // linked-list items (merged into the same native pin store) are never
+          // promoted here since they belong to the Lists feature, not Reminders.
           const toPromote = nativeReminders.filter(
-            (n) => !activeIds.has(n.id) && !doneIds.has(n.id)
+            (n) =>
+              !activeIds.has(n.id) &&
+              !doneIds.has(n.id) &&
+              !n.id.startsWith(LIST_ITEM_ID_PREFIX)
           );
           if (toPromote.length > 0) {
             const promotedIds = new Set(toPromote.map((n) => n.id));
