@@ -206,6 +206,10 @@ export function startReminderHeartbeat() {
 /**
  * Read the reminders currently held in the native persistent "To Do" list —
  * including any promoted directly by a native alarm while the app was killed.
+ * May also include undone items from linked custom lists (see useLists),
+ * since they are merged into the same native store; callers that "promote"
+ * entries into the plain Reminders feature must filter those back out by id
+ * prefix (see LIST_ITEM_ID_PREFIX in hooks/useLists.ts).
  */
 export async function getNativeForegroundReminders(): Promise<
   Array<{ id: string; text: string; createdAt: number }>
@@ -257,6 +261,13 @@ export function requestBatteryOptimizationExemption() {
   );
 }
 
+// The pinned "To Do" notification aggregates two independent sources — plain
+// reminders and undone items from any list the user has linked to it — so
+// each source mirrors its own latest slice here and every change re-merges
+// and re-posts the single combined pin.
+let latestReminders: Array<{ id: string; text: string }> = [];
+let latestLinkedListItems: Array<{ id: string; text: string }> = [];
+
 /**
  * Synchronize the current active reminder list to persistent silent notifications.
  * Notification Title: "To Do"
@@ -264,6 +275,25 @@ export function requestBatteryOptimizationExemption() {
 export async function syncRemindersToNotifications(
   reminders: Array<{ id: string; text: string }>
 ) {
+  latestReminders = reminders;
+  await pinToDoNotification();
+}
+
+/**
+ * Mirror the undone items of any linked custom list into the same pinned
+ * "To Do" notification as plain reminders. Only lists the user has explicitly
+ * linked (see useLists) contribute here.
+ */
+export async function syncLinkedListItemsToNotifications(
+  items: Array<{ id: string; text: string }>
+) {
+  latestLinkedListItems = items;
+  await pinToDoNotification();
+}
+
+async function pinToDoNotification() {
+  const reminders = [...latestReminders, ...latestLinkedListItems];
+
   // ── Layer 1: Native foreground service (built APK only) ──────────────────
   if (Platform.OS === 'android' && ReminderModule) {
     try {
